@@ -1,0 +1,1 @@
+{"infrastructure": [{"type": "solar", "location": "North", "capacity": "500kW"}, {"type": "wind", "location": "East", "capacity": "750kW"}]}
