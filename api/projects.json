@@ -1,5 +1,0 @@
-[  
-  {"id": 1, "name": "Wind Farm", "type": "Renewable", "capacity": 1500, "location": "Texas"},  
-  {"id": 2, "name": "Solar Farm", "type": "Renewable", "capacity": 1000, "location": "California"},  
-  {"id": 3, "name": "Natural Gas Plant", "type": "Fossil Fuel", "capacity": 2000, "location": "Florida"}  
-]
