@@ -10,12 +10,39 @@
                         /_/
             Created with Perplexity Computer
             https://www.perplexity.ai/computer
+
+    DEPLOYMENT NOTES
+    ════════════════
+    This is a fully self-contained static build.
+    No backend server required.
+
+    Data strategy
+    ─────────────
+    • /api/*  calls  →  intercepted by sw.js (Service Worker)
+      Data is embedded directly in sw.js — no backend, no cache.
+      Served fresh on every request with Cache-Control: no-store.
+
+    • Live external APIs (fetched uncached on every load):
+      - NOAA GML CO₂       https://global-warming.org/api/co2-api
+      - NOAA GML CH₄       https://global-warming.org/api/methane-api
+      - NOAA GML N₂O       https://global-warming.org/api/nitrous-oxide-api
+      - NASA GISS Temp      https://global-warming.org/api/temperature-api
+      - Open-Meteo CAMS     https://air-quality-api.open-meteo.com/v1/air-quality
+      - WAQI AQI stations   https://api.waqi.info/map/bounds/
+
+    Hosting
+    ───────
+    Upload this entire folder (index.html, sw.js, assets/) to any
+    static host: GitHub Pages, Netlify, Vercel, Cloudflare Pages, S3, etc.
+    Service Workers require HTTPS (or localhost).
     -->
-    <!-- Perplexity Computer Attribution — SEO Meta Tags -->
+
+    <!-- Perplexity Computer Attribution -->
     <meta name="generator" content="Perplexity Computer">
     <meta name="author" content="Perplexity Computer">
     <meta property="og:see_also" content="https://www.perplexity.ai/computer">
     <link rel="author" href="https://www.perplexity.ai/computer">
+
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23059669'/><path d='M16 6L20 14H28L21.5 19L23.5 27L16 22.5L8.5 27L10.5 19L4 14H12L16 6Z' fill='white'/></svg>" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -23,15 +50,116 @@
     <meta name="description" content="Interactive global map of energy projects, infrastructure, and status — powered by open data APIs." />
     <meta property="og:title" content="Global Energy Map" />
     <meta property="og:description" content="Live interactive map of global energy infrastructure, power plants, and projects." />
-    <!-- Leaflet CSS -->
+
+    <!-- Prevent browser caching of this page -->
+    <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+
+    <!-- Leaflet CSS (CDN — always latest patch, no cache) -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
     <!-- Inter font -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+    <!-- App bundle (original assets unchanged) -->
     <script type="module" crossorigin src="./assets/index-CmLvoQEz.js"></script>
     <link rel="stylesheet" crossorigin href="./assets/index-aftsZi9U.css">
+
+    <style>
+      /* Loading splash shown before React hydrates */
+      #sw-splash {
+        position: fixed; inset: 0;
+        background: #0b0d12;
+        color: #10b981;
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center;
+        gap: 16px;
+        font-family: Inter, system-ui, sans-serif;
+        font-size: 13px;
+        z-index: 9999;
+        transition: opacity 0.4s;
+      }
+      #sw-splash.hide { opacity: 0; pointer-events: none; }
+      #sw-splash svg { animation: spin 1.2s linear infinite; }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      #sw-splash p { color: #7a8494; margin: 0; }
+    </style>
   </head>
   <body>
+    <!-- Loading splash -->
+    <div id="sw-splash" role="status" aria-label="Loading">
+      <svg width="36" height="36" viewBox="0 0 36 36" fill="none">
+        <circle cx="18" cy="18" r="14" stroke="#10b981" stroke-width="2" stroke-dasharray="55 35"/>
+      </svg>
+      <strong style="color:#dde2ea">Global Energy Map</strong>
+      <p id="sw-status">Initialising…</p>
+    </div>
+
     <div id="root"></div>
+
+    <script>
+      /**
+       * Service Worker registration.
+       * The SW intercepts all /api/* and port/5000/api/* calls
+       * and returns embedded data with Cache-Control: no-store.
+       *
+       * Live external APIs (NOAA, Open-Meteo, WAQI) pass through
+       * the SW unmodified — they are always fetched fresh from
+       * their origin servers.
+       */
+      (function () {
+        const splash = document.getElementById('sw-splash');
+        const status = document.getElementById('sw-status');
+
+        function hideSplash() {
+          splash.classList.add('hide');
+          setTimeout(() => splash.remove(), 500);
+        }
+
+        // Fallback: hide splash after 4 s regardless
+        const fallback = setTimeout(hideSplash, 4000);
+
+        if (!('serviceWorker' in navigator)) {
+          status.textContent = 'Service Workers not supported — some API data may be unavailable.';
+          clearTimeout(fallback);
+          hideSplash();
+          return;
+        }
+
+        // Register the service worker from the same directory
+        navigator.serviceWorker
+          .register('./sw.js', { scope: './' })
+          .then(reg => {
+            status.textContent = 'Loading energy data…';
+
+            const activate = () => {
+              clearTimeout(fallback);
+              hideSplash();
+            };
+
+            if (reg.active) {
+              // Already active — React can render immediately
+              activate();
+            } else {
+              // Wait for the SW to activate (first install)
+              const pending = reg.installing || reg.waiting;
+              if (pending) {
+                pending.addEventListener('statechange', function () {
+                  if (this.state === 'activated') activate();
+                });
+              } else {
+                activate();
+              }
+            }
+          })
+          .catch(err => {
+            console.warn('SW registration failed:', err);
+            clearTimeout(fallback);
+            hideSplash();
+          });
+      })();
+    </script>
   </body>
 </html>
